@@ -12,7 +12,6 @@ interface Hex {
 
 interface Tile {
   hex: Hex;
-  color: string; // Color of the tile
 
   name: string;
   resources: number;
@@ -50,7 +49,6 @@ function drawHex(
   centerX: number,
   centerY: number,
   size: number,
-  color: string,
 ): void {
   const angles = Array.from({ length: 6 }, (_, i) => (Math.PI / 3) * i);
   ctx.beginPath();
@@ -60,7 +58,7 @@ function drawHex(
     ctx.lineTo(x, y);
   }
   ctx.closePath();
-  ctx.fillStyle = color;
+  ctx.fillStyle = `#091d66`,
   ctx.fill();
   ctx.strokeStyle = "black";
   ctx.lineWidth = 1;
@@ -81,7 +79,7 @@ function renderGrid(
     const centerX = x + canvas.width / 2 + offset.x;
     const centerY = y + canvas.height / 2 + offset.y;
 
-    drawHex(ctx, centerX, centerY, size, tile.color);
+    drawHex(ctx, centerX, centerY, size);
 
     if (tile.name) {
       ctx.fillStyle = "white";
@@ -90,11 +88,11 @@ function renderGrid(
       ctx.textBaseline = "middle";
       ctx.fillText(tile.name, centerX, centerY + (size / 2 + size / 7.5));
       ctx.fillText(
-        tile.resources,
+        String(tile.resources),
         centerX - 35,
         centerY + (size / 3 + 10) - 10,
       );
-      ctx.fillText(tile.influence, centerX - 30, centerY + (size / 3 + 10));
+      ctx.fillText(String(tile.influence), centerX - 30, centerY + (size / 3 + 10));
     }
   }
 }
@@ -105,49 +103,21 @@ function HexGrid({
 
   zoomSpeed = 1,
   panSpeed = 2,
+}: {
+  hexSize?: number;
+  tiles: Tile[];
+
+  zoomSpeed?: number;
+  panSpeed?: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
 
-  const [windowSize, setWindowSize] = useState({
-    width: window.innerWidth,
-    height: window.innerHeight,
-  });
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
-  const resizeWindow = () => {
-    setWindowSize({ width: window.innerWidth, height: window.innerHeight });
-  };
-
-  useEffect(() => {
-    window.addEventListener("resize", resizeWindow);
-    return () => window.removeEventListener("resize", resizeWindow);
-  }, []);
-
-  const handleWheel = (event: WheelEvent) => {
-    event.preventDefault();
-    const delta = (event.deltaY < 0 ? 0.1 : -0.1) * zoomSpeed;
-    setZoom((prevZoom) => Math.min(Math.max(prevZoom + delta, 0.5), 2));
-  };
-
+  const offset = useRef({ x: 0, y: 0 });
+  const zoom = useRef(1);
+  const frameRef = useRef<number>(0);
   const isDragging = useRef(false);
   const lastMousePosition = useRef({ x: 0, y: 0 });
-
-  const handleMouseDown = (event: MouseEvent) => {
-    isDragging.current = true;
-    lastMousePosition.current = { x: event.clientX, y: event.clientY };
-  };
-
-  const handleMouseMove = (event: MouseEvent) => {
-    if (!isDragging.current) return;
-    const dx = (event.clientX - lastMousePosition.current.x) * panSpeed;
-    const dy = (event.clientY - lastMousePosition.current.y) * panSpeed;
-    setOffset((prevOffset) => ({ x: prevOffset.x + dx, y: prevOffset.y + dy }));
-    lastMousePosition.current = { x: event.clientX, y: event.clientY };
-  };
-
-  const handleMouseUp = () => {
-    isDragging.current = false;
-  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -157,8 +127,33 @@ function HexGrid({
     if (!ctx) return;
 
     const render = () => {
-      renderGrid(ctx, tiles, hexSize * zoom, windowSize, offset);
-      requestAnimationFrame(render);
+      const windowSize = { width: window.innerWidth, height: window.innerHeight }
+      setCanvasSize(windowSize);
+      renderGrid(ctx, tiles, hexSize * zoom.current, windowSize, offset.current);
+      frameRef.current = requestAnimationFrame(render);
+    };
+
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const delta = (event.deltaY < 0 ? 0.1 : -0.1) * zoomSpeed;
+      zoom.current = Math.min(Math.max(zoom.current + delta, 0.5), 2);
+    };
+
+    const handleMouseDown = (event: MouseEvent) => {
+      isDragging.current = true;
+      lastMousePosition.current = { x: event.clientX, y: event.clientY };
+    };
+
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!isDragging.current) return;
+      const dx = (event.clientX - lastMousePosition.current.x) * panSpeed;
+      const dy = (event.clientY - lastMousePosition.current.y) * panSpeed;
+      offset.current = { x: offset.current.x + dx, y: offset.current.y + dy };
+      lastMousePosition.current = { x: event.clientX, y: event.clientY };
+    };
+
+    const handleMouseUp = () => {
+      isDragging.current = false;
     };
 
     canvas.addEventListener("wheel", handleWheel);
@@ -167,47 +162,49 @@ function HexGrid({
     canvas.addEventListener("mouseup", handleMouseUp);
     canvas.addEventListener("mouseleave", handleMouseUp);
 
-    requestAnimationFrame(render);
+    frameRef.current = requestAnimationFrame(render);
     return () => {
-      cancelAnimationFrame(render);
+      cancelAnimationFrame(frameRef.current);
       canvas.removeEventListener("wheel", handleWheel);
       canvas.removeEventListener("mousedown", handleMouseDown);
       canvas.removeEventListener("mousemove", handleMouseMove);
       canvas.removeEventListener("mouseup", handleMouseUp);
       canvas.removeEventListener("mouseleave", handleMouseUp);
     };
-  }, [hexSize, tiles, zoom, offset]);
+  }, [tiles, hexSize, panSpeed, zoomSpeed]);
 
   return (
     <canvas
       style={{ fontSmooth: "never", WebkitFontSmoothing: "none" }}
       ref={canvasRef}
-      width={windowSize.width}
-      height={windowSize.height}
+      width={canvasSize.width}
+      height={canvasSize.height}
     />
   );
 }
 
+function shuffle<T>(array: T[]): T[] {
+  let copy = [...array]
+  for (let i = copy.length - 1; i > 0; i--) {
+    let j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy
+}
+
 export default function Home() {
   const hexes = generateHexGrid(3);
-  let planetDeck = planets.slice();
+  let planetDeck = shuffle(planets);
 
   const tiles: Tile[] = hexes.map((hex) => {
-    var planet = undefined;
-    if (hex.q === 0 && hex.r === 0) {
-      planet = mecatol;
-    } else {
-      planet = planetDeck.splice(
-        Math.floor(Math.random() * planetDeck.length),
-        1,
-      )[0];
-    }
-
-    return {
-      ...planet,
-      hex,
-      color: `#091d66`,
-    };
+		  if (hex.q === 0 && hex.r === 0) {
+        return { ...mecatol, hex };
+		  }
+		  const planet = planetDeck.splice(
+				  Math.floor(Math.random() * planetDeck.length),
+				  1,
+				  )[0];
+		  return { ...planet, hex };
   });
   return <HexGrid tiles={tiles} />;
 }
