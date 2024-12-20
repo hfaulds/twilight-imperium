@@ -71,15 +71,15 @@ function renderGrid(
   ctx: CanvasRenderingContext2D,
   tiles: Tile[],
   size: number,
-  canvasWidth: number,
-  canvasHeight: number,
+  canvas: { width: number; height: number },
+  offset: { x: number; y: number },
 ): void {
-  ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   for (const tile of tiles) {
     const { x, y } = hexToPixel(tile.hex, size);
-    const centerX = x + canvasWidth / 2;
-    const centerY = y + canvasHeight / 2;
+    const centerX = x + canvas.width / 2 + offset.x;
+    const centerY = y + canvas.height / 2 + offset.y;
 
     drawHex(ctx, centerX, centerY, size, tile.color);
 
@@ -88,7 +88,7 @@ function renderGrid(
       ctx.font = `${size / 6}px Arial`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(tile.name, centerX, centerY + (size / 2 + 10));
+      ctx.fillText(tile.name, centerX, centerY + (size / 2 + size / 7.5));
       ctx.fillText(
         tile.resources,
         centerX - 35,
@@ -102,18 +102,20 @@ function renderGrid(
 function HexGrid({
   hexSize = 75, // Adjust the size of each hexagon
   tiles,
+
+  zoomSpeed = 1,
+  panSpeed = 2,
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [windowSize, setWindowSize] = useState({
-    innerWidth: window.innerWidth,
-    innerHeight: window.innerHeight,
-  });
 
+  const [windowSize, setWindowSize] = useState({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  });
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
   const resizeWindow = () => {
-    setWindowSize({
-      innerWidth: window.innerWidth,
-      innerHeight: window.innerHeight,
-    });
+    setWindowSize({ width: window.innerWidth, height: window.innerHeight });
   };
 
   useEffect(() => {
@@ -121,35 +123,67 @@ function HexGrid({
     return () => window.removeEventListener("resize", resizeWindow);
   }, []);
 
-  const requestRef = useRef();
+  const handleWheel = (event: WheelEvent) => {
+    event.preventDefault();
+    const delta = (event.deltaY < 0 ? 0.1 : -0.1) * zoomSpeed;
+    setZoom((prevZoom) => Math.min(Math.max(prevZoom + delta, 0.5), 2));
+  };
+
+  const isDragging = useRef(false);
+  const lastMousePosition = useRef({ x: 0, y: 0 });
+
+  const handleMouseDown = (event: MouseEvent) => {
+    isDragging.current = true;
+    lastMousePosition.current = { x: event.clientX, y: event.clientY };
+  };
+
+  const handleMouseMove = (event: MouseEvent) => {
+    if (!isDragging.current) return;
+    const dx = (event.clientX - lastMousePosition.current.x) * panSpeed;
+    const dy = (event.clientY - lastMousePosition.current.y) * panSpeed;
+    setOffset((prevOffset) => ({ x: prevOffset.x + dx, y: prevOffset.y + dy }));
+    lastMousePosition.current = { x: event.clientX, y: event.clientY };
+  };
+
+  const handleMouseUp = () => {
+    isDragging.current = false;
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext("2d", {alpha:false});
+    const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) return;
 
     const render = () => {
-      renderGrid(
-        ctx,
-        tiles,
-        hexSize,
-        windowSize.innerWidth,
-        windowSize.innerHeight,
-      );
-      requestRef.current = requestAnimationFrame(render);
+      renderGrid(ctx, tiles, hexSize * zoom, windowSize, offset);
+      requestAnimationFrame(render);
     };
-    requestRef.current = requestAnimationFrame(render);
-    return () => cancelAnimationFrame(requestRef.current);
-  }, [hexSize, tiles]);
+
+    canvas.addEventListener("wheel", handleWheel);
+    canvas.addEventListener("mousedown", handleMouseDown);
+    canvas.addEventListener("mousemove", handleMouseMove);
+    canvas.addEventListener("mouseup", handleMouseUp);
+    canvas.addEventListener("mouseleave", handleMouseUp);
+
+    requestAnimationFrame(render);
+    return () => {
+      cancelAnimationFrame(render);
+      canvas.removeEventListener("wheel", handleWheel);
+      canvas.removeEventListener("mousedown", handleMouseDown);
+      canvas.removeEventListener("mousemove", handleMouseMove);
+      canvas.removeEventListener("mouseup", handleMouseUp);
+      canvas.removeEventListener("mouseleave", handleMouseUp);
+    };
+  }, [hexSize, tiles, zoom, offset]);
 
   return (
     <canvas
-      style={{"font-smooth": "never", "-webkit-font-smoothing": "none"}}
+      style={{ fontSmooth: "never", WebkitFontSmoothing: "none" }}
       ref={canvasRef}
-      width={windowSize.innerWidth}
-      height={windowSize.innerHeight}
+      width={windowSize.width}
+      height={windowSize.height}
     />
   );
 }
